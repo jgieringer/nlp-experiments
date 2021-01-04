@@ -70,10 +70,10 @@ def prep_training_data(train_texts, train_labels, parser=lambda x:x):
 
 def mk_model(model=None, arch="simple_cnn", base_model=None, model_labels=None):
     """Create or load a spacy pipeline and initialize TextCategorizer component"""
-#     if base_model is not None:
-#         print(f"Loading base_model {base_model}")
-#         nlp = spacy.load(base_model)
-    if model is not None:
+    if base_model is not None:
+        print(f"Loading base_model {base_model}")
+        nlp = spacy.load(base_model)
+    elif model is not None:
         if 'spacy' in str(type(model)):
             nlp = model # use existing spaCy model
             print("Using model '%s'" % '_'.join([nlp.meta['lang'],nlp.meta['name']]))
@@ -83,15 +83,6 @@ def mk_model(model=None, arch="simple_cnn", base_model=None, model_labels=None):
     else:
         print("Creating blank 'en' model")
         nlp = spacy.blank("en")  # create blank Language class
-        
-    # load textcat checkpoint to continue training
-    if base_model is not None:
-        # possible todo: was having errors with nlp.from_disk(base_model), but spacy.load works for now.
-        print(f"Loading textcat from {base_model}")
-        textcat = spacy.pipeline.TextCategorizer(nlp.vocab)
-        textcat.from_disk(base_model)
-        nlp.add_pipe(textcat)
-#         nlp.add_pipe(spacy.load(base_model).get_pipe('textcat'))
 
     # add the text classifier to the pipeline if it doesn't exist
     # nlp.create_pipe works for built-ins that are registered with spaCy
@@ -129,17 +120,10 @@ def evaluate(textcat, docs, labels):
 
 
 def train_textcat(nlp, train_data, init_tok2vec=None, continue_training=False,
-                  epochs=10, seed=0, dropout_rates=(0.6, 0.2, 1e-4), minibatch_sizes=(1.0, 64.0, 1.001),
+                  epochs=10, dropout_rates=(0.6, 0.2, 1e-4), minibatch_sizes=(1.0, 64.0, 1.001),
                   valid_docs=None, valid_labels=None, output_dir=None, use_tqdm=False):
     """Train, evaluate, and store TextCategorizer model."""
-    if "textcat" in nlp.pipe_names:
-        # set all seeds for reproducability
-        random.seed(seed)
-        numpy.random.seed(seed)
-        if spacy.prefer_gpu():
-            import cupy
-            cupy.random.seed(seed)
-        
+    if "textcat" in nlp.pipe_names:        
         train_eval_time = time.time()
         
         if valid_docs is not None or init_tok2vec is not None:
@@ -211,6 +195,8 @@ def train_textcat(nlp, train_data, init_tok2vec=None, continue_training=False,
                         best_avg_f1 = avg_f1
                         # overwrite the weak with the strong
                         store_model(output_dir, nlp, optimizer)
+                else:
+                    print("{0:.3f}\t{1:}\t{2:}\t{3:}".format(losses["textcat"],"_____","_____","_____"))
                 
                 if use_tqdm:
                     # train_data was put into tqdm object and won't shuffle properly due to indexing
@@ -256,6 +242,13 @@ def main(train_path, valid_path=None, model=None,
          textcat_arch="simple_cnn", base_model=None, output_dir=None, epochs=10, 
          seed=13, dropout_rates=(0.6, 0.2, 1e-4), minibatch_sizes=(1.0, 64.0, 1.001), 
          init_tok2vec=None, use_tqdm=False):    
+
+    # set seed for reproducability
+    random.seed(seed)
+    numpy.random.seed(seed)
+    if spacy.prefer_gpu():
+        import cupy
+        cupy.random.seed(seed)
     
     # load train data
     train_texts, train_labels = load_ft_file(train_path)
@@ -298,7 +291,6 @@ def main(train_path, valid_path=None, model=None,
                   init_tok2vec=init_tok2vec,
                   continue_training=False if base_model is None else True,
                   epochs=epochs,
-                  seed=seed,
                   dropout_rates=dropout_rates,
                   minibatch_sizes=minibatch_sizes,
                   valid_docs=valid_docs,
